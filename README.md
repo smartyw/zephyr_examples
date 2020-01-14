@@ -1,2 +1,2 @@
 # zephyr_examples
-A collection of code examples relating to the Zephyr RTOS
+A collection of code demonstrating aspects of programming for the Zephyr RTOS
