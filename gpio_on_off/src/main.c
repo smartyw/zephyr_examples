@@ -18,6 +18,9 @@ struct device *gpio_dev;
 static struct gpio_callback gpio_btnA_cb;
 static struct gpio_callback gpio_btnB_cb;
 
+#define BUTTON_DEBOUNCE_DELAY_MS 250
+static u32_t time, last_time;
+
 // GPIO for the connected LED
 // See board.h in zephyr/boards/arm/bbc_microbit
 #define LED0 EXT_P0_GPIO_PIN
@@ -25,6 +28,16 @@ static struct gpio_callback gpio_btnB_cb;
 // for use with k_work_submit which we use to handle button presses in a background thread to avoid holding onto an IRQ for too long
 static struct k_work buttonA_work;
 static struct k_work buttonB_work;
+
+bool debounce() {
+	bool result = false;
+	time = k_uptime_get_32();
+	if (time < last_time + BUTTON_DEBOUNCE_DELAY_MS) {
+		result = true;
+	}
+	last_time = time;
+    return result;
+}
 
 void set_led(int state) {
 	printk("set_led %d\n",state);
@@ -46,6 +59,9 @@ void buttonB_work_handler(struct k_work *work)
 void button_A_pressed(struct device *gpiob, struct gpio_callback *cb,
 											u32_t pins)
 {
+	if (debounce()) {
+		return;
+	}
 	printk("Button A pressed at %d\n", k_cycle_get_32());
 	k_work_submit(&buttonA_work);
 }
@@ -53,6 +69,9 @@ void button_A_pressed(struct device *gpiob, struct gpio_callback *cb,
 void button_B_pressed(struct device *gpiob, struct gpio_callback *cb,
 											u32_t pins)
 {
+	if (debounce()) {
+		return;
+	}
 	printk("Button B pressed at %d\n", k_cycle_get_32());
 	k_work_submit(&buttonB_work);
 }

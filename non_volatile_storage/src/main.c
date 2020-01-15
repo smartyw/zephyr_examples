@@ -54,9 +54,6 @@ bool debounce() {
 
 void buttonA_work_handler(struct k_work *work)
 {
-	if (debounce()) {
-		return;
-	}
     value = sys_rand32_get();
 	printk("Storing random number %d\n",value);
 	int bytes_written = nvs_write(&fs, DATA_ID, &value, sizeof(value));
@@ -69,9 +66,6 @@ void buttonA_work_handler(struct k_work *work)
 
 void buttonB_work_handler(struct k_work *work)
 {
-	if (debounce()) {
-		return;
-	}
     int err = nvs_read(&fs, DATA_ID, &value, sizeof(value));
 	if (err > 0) { 
 		printk("Value: %d\n",value);
@@ -83,6 +77,9 @@ void buttonB_work_handler(struct k_work *work)
 void button_A_pressed(struct device *gpiob, struct gpio_callback *cb,
 											u32_t pins)
 {
+	if (debounce()) {
+		return;
+	}
 	// printk("Button A pressed at %d\n", k_cycle_get_32());
 	k_work_submit(&buttonA_work);
 }
@@ -90,6 +87,9 @@ void button_A_pressed(struct device *gpiob, struct gpio_callback *cb,
 void button_B_pressed(struct device *gpiob, struct gpio_callback *cb,
 											u32_t pins)
 {
+	if (debounce()) {
+		return;
+	}
 	// printk("Button B pressed at %d\n", k_cycle_get_32());
 	k_work_submit(&buttonB_work);
 }
