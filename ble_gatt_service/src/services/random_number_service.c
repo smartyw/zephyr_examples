@@ -17,8 +17,9 @@
 #include <services/random_number_service.h>
 
 u32_t random_number;
-// in ms and therefore value is 100 x that of the corresponding characteristic
-u32_t rnd_frequency;
+u8_t random_number_bytes[4] = {0, 0, 0, 0};
+
+u16_t rnd_frequency;
 struct k_delayed_work random_number_timer;
 u8_t random_number_subscribed;
 u8_t is_generating;
@@ -32,7 +33,7 @@ struct bt_conn *the_conn;
 // It can be read and supports notifications but cannot be written to.
 // The random number value changes at a frequency determined by the second characteristic. 
 // 
-// The second characteristic contains a 16-bit integer which when multipled by 100 represents
+// The second characteristic contains a 16-bit integer which represents
 // the frequency with which new random numbers are generated for the first characteristic, 
 // measured in milliseconds. 
 //
@@ -48,7 +49,7 @@ struct bt_conn *the_conn;
 static struct bt_gatt_attr attrs[] = {
 		BT_GATT_PRIMARY_SERVICE(BT_UUID_RND_SERVICE),
 		//BT_GATT_CHARACTERISTIC: uuid, properties, access perms, read callback, write callback, value
-		BT_GATT_CHARACTERISTIC(BT_UUID_RANDOM_NUMBER, BT_GATT_CHRC_READ|BT_GATT_CHRC_NOTIFY,BT_GATT_PERM_READ, NULL, NULL, NULL),
+		BT_GATT_CHARACTERISTIC(BT_UUID_RANDOM_NUMBER, BT_GATT_CHRC_READ|BT_GATT_CHRC_NOTIFY,BT_GATT_PERM_READ, read_rnd, NULL, NULL),
 		// BT_GATT_CCC: initial config, changed callback
 		BT_GATT_CCC(rnd_ccc_cfg, rnd_ccc_cfg_changed),
 
@@ -60,24 +61,46 @@ static struct bt_gatt_service random_number_svc = BT_GATT_SERVICE(attrs);
 void random_number_service_init()
 {
 	bt_gatt_service_register(&random_number_svc);
-	rnd_frequency = 10; // once a second default
+	rnd_frequency = 1000; // once a second default
 	random_number = 0;
+}
+
+void generate_random_number() {
+	random_number = sys_rand32_get();
+	// NB: little endian
+	random_number_bytes[3] = (random_number >> 24) & 0xFF;
+	random_number_bytes[2] = (random_number >> 16) & 0xFF;
+	random_number_bytes[1] = (random_number >> 8) & 0xFF;
+	random_number_bytes[0] = random_number;
+
+	printf("%x %x %x %x\n", random_number_bytes[0], random_number_bytes[1], random_number_bytes[2], random_number_bytes[3]);
+}
+
+ssize_t read_rnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, u16_t len, u16_t offset) {
+    generate_random_number();
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, &random_number_bytes, sizeof(random_number_bytes));
 }
 
 ssize_t write_rnd_frequency(struct bt_conn *conn,const struct bt_gatt_attr *attr,const void *buf, u16_t len, u16_t offset,u8_t flags)
 {
-	printk("write_rnd_frequency\n");
-
-	const u16_t *new_value = buf;
+	const u8_t *new_value = buf;
 
 	if (len != 2)
 	{
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
 
-	rnd_frequency = new_value[0] + (new_value[1] ^ 2);
+	u16_t new_rnd_frequency = (new_value[1] << 8) + new_value[0];
 
-	printk("rnd_frequency: (%d)\n", rnd_frequency);
+    // 250ms seems like a reasonable lower limit for notifications
+	if (new_rnd_frequency < 250)
+	{
+		return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+	}
+
+    rnd_frequency = new_rnd_frequency;
+
+	printk("new rnd_frequency: %d\n", rnd_frequency);
 
 	return len;
 }
@@ -92,20 +115,9 @@ void rnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, u16_t value)
 	printk("random_number_subscribed set to %d\n", random_number_subscribed);
 	if (random_number_subscribed == 1) {
 		start_generating_random_numbers();
+	} else {
+		stop_generating_random_numbers();
 	}
-}
-
-void notify_random_number(u32_t random_number)
-{
-    unsigned char random_number_bytes[4] = {0, 0, 0, 0};
-
-	// NB: little endian
-	random_number_bytes[3] = (random_number >> 24);
-	random_number_bytes[2] = (random_number >> 16);
-	random_number_bytes[1] = (random_number >> 8);
-	random_number_bytes[0] = random_number;
-
-	bt_gatt_notify(the_conn, &attrs[1],&random_number_bytes, 4);
 }
 
 u8_t get_random_number_subscribed()
@@ -113,11 +125,12 @@ u8_t get_random_number_subscribed()
 	return random_number_subscribed;
 }
 
-void generate_random_number()
+void notify_random_number()
 {
-	random_number = sys_rand32_get();
-	notify_random_number(random_number);
-
+	generate_random_number();
+	if (is_generating == 1) {
+    	bt_gatt_notify(the_conn, &attrs[1],&random_number_bytes, sizeof(random_number_bytes));
+	}
 	// and again
 	if (is_generating == 1) {
 		k_delayed_work_submit(&random_number_timer, K_MSEC(rnd_frequency));
@@ -127,13 +140,16 @@ void generate_random_number()
 void start_generating_random_numbers()
 {
 	is_generating = 1;
-    k_delayed_work_init(&random_number_timer, generate_random_number);
+    k_delayed_work_init(&random_number_timer, notify_random_number);
 	k_delayed_work_submit(&random_number_timer, K_MSEC(rnd_frequency));
 }
 
 void stop_generating_random_numbers()
 {
-	printk("stopping generating random numbers\n");
-	is_generating = 0;
+	if (is_generating == 1) {
+	    printk("stopping generating random numbers\n");
+	    is_generating = 0;
+		k_delayed_work_cancel(&random_number_timer);
+	}
 }
 

@@ -27,6 +27,7 @@ static void connected(struct bt_conn *conn, u8_t err)
 {
 	if (!err)
 	{
+		printk("Connection established\n");
 		default_conn = bt_conn_ref(conn);
 		set_connection(conn);
 	}
@@ -87,5 +88,5 @@ void main(void)
 		return;
 	}
 
-	// bt_conn_cb_register(&conn_callbacks);
+	bt_conn_cb_register(&conn_callbacks);
 }

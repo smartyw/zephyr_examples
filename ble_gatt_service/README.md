@@ -7,4 +7,3 @@ Tested on BBC microbit.
 
 Build with the Zephyr source v1.14-branch
 
-Totally insecure at this stage!
