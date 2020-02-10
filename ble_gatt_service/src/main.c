@@ -48,6 +48,14 @@ static void disconnected(struct bt_conn *conn, u8_t reason)
 		bt_conn_unref(default_conn);
 		default_conn = NULL;
 	}
+	// start advertising again
+	int	err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), NULL, 0);
+	if (err)
+	{
+		printk("Advertising failed to start (err %d)\n", err);
+	} else {
+    	        printk("Advertising successfully started\n");
+	}
 }
 
 static struct bt_conn_cb conn_callbacks = {
